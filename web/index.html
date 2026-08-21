@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mini Memory Layer — static demo</title>
+  <style>
+    :root{color-scheme:dark;--bg:#080b10;--panel:#0e131b;--line:#263140;--text:#d7dee8;--muted:#7f8c9e;--green:#59e391;--cyan:#55d6e8;--amber:#f4c66a;--red:#ff7185}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;padding:28px 18px;overflow-x:hidden}
+    main{width:min(1060px,100%);margin:auto}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{color:var(--green);font-size:12px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:7px}h1{font-size:clamp(21px,4vw,32px);line-height:1.15;margin:0 0 8px;color:#fff}.sub{color:var(--muted);font-size:13px;line-height:1.5}.status{white-space:nowrap;border:1px solid #214d34;color:var(--green);background:#0d2016;padding:7px 10px;border-radius:5px;font-size:12px}.status:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:7px;box-shadow:0 0 9px currentColor}
+    .controls{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:12px;border:1px solid var(--line);border-bottom:0;background:#0b1017;border-radius:8px 8px 0 0}.field{display:grid;gap:5px}.field label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}input,select,button{font:inherit;border-radius:4px;border:1px solid #344154;background:#111925;color:var(--text);padding:8px 10px}input{width:180px}input[type=number]{width:62px}button{cursor:pointer;font-weight:700}button:hover:not(:disabled){border-color:var(--cyan);color:#fff}button.primary{background:var(--green);border-color:var(--green);color:#06130a}button:disabled{opacity:.45;cursor:not-allowed}.spacer{flex:1}.speed{width:105px}
+    .terminal{border:1px solid var(--line);background:var(--panel);border-radius:0 0 8px 8px;min-height:590px;box-shadow:0 20px 70px #0008;overflow:hidden}.bar{height:36px;display:flex;align-items:center;gap:7px;padding:0 13px;background:#141b25;border-bottom:1px solid var(--line)}.dot{width:10px;height:10px;border-radius:50%}.dot:nth-child(1){background:#ff6b6b}.dot:nth-child(2){background:#f7c85d}.dot:nth-child(3){background:#58d68d}.bar span:last-child{margin-left:8px;color:var(--muted);font-size:11px}.output{padding:18px;line-height:1.55;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.line{min-height:1.55em}.dim{color:var(--muted)}.green{color:var(--green)}.cyan{color:var(--cyan)}.amber{color:var(--amber)}.red{color:var(--red)}.bright{color:#fff;font-weight:700}.cursor:after{content:"▋";color:var(--green);animation:blink .9s steps(1) infinite}@keyframes blink{50%{opacity:0}}
+    .footer{display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:11px;margin-top:12px}.footer code{color:var(--cyan)}
+    @media(max-width:640px){body{padding:14px 10px}.top{display:block}.status{display:inline-block;margin-top:12px}.controls{align-items:stretch}.field{flex:1 1 125px}.field input,.field select{width:100%}.controls button{flex:1 1 100px}.spacer{display:none}.terminal{min-height:520px}.output{padding:13px 11px;font-size:11px}.footer{display:block;line-height:1.7}}
+  </style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div><div class="eyebrow">extract → compress → retrieve</div><h1>Mini Memory Layer</h1><div class="sub">Full-history replay vs persistent, ranked memory context</div></div>
+    <div class="status">STATIC · OFFLINE</div>
+  </header>
+  <section class="controls" aria-label="Demo controls">
+    <div class="field"><label for="user">user_id</label><input id="user" value="demo-user" maxlength="40"></div>
+    <div class="field"><label for="k">top-k</label><input id="k" type="number" value="3" min="1" max="10"></div>
+    <div class="field"><label for="speed">playback</label><select id="speed" class="speed"><option value="1">1×</option><option value="0.5">2×</option><option value="0">instant</option></select></div>
+    <div class="spacer"></div>
+    <button id="reset">Reset</button><button id="run" class="primary">▶ Run demo</button>
+  </section>
+  <section class="terminal" aria-live="polite">
+    <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>mem0-mini — browser simulation</span></div>
+    <div id="output" class="output"><div class="dim">Ready. Press “Run demo” to begin.</div><div class="cursor"></div></div>
+  </section>
+  <div class="footer"><span>Redis schema simulated in memory: <code>mem:{user_id}</code></span><span>No server · no credentials · no network</span></div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const SESSION1_TURNS = [
+    "Hi — I'm Alex. I'm planning weeknight dinners for my family.",
+    "Important: I'm vegetarian and allergic to peanuts. Please never suggest dishes with nuts.",
+    "We usually have about 30 minutes to cook after work.",
+    "What should I make tonight that fits those constraints?"
+  ];
+  const SESSION2_QUESTION = "I'm back. Suggest a different dinner for tonight — same constraints as before.";
+  const MODEL = 'anthropic.claude-3-haiku-20240307-v1:0';
+  const store = new Map(); // Browser equivalent of Redis LIST values keyed by mem:{user_id}.
+  const out = document.querySelector('#output');
+  const runButton = document.querySelector('#run');
+  const resetButton = document.querySelector('#reset');
+  let generation = 0;
+
+  const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function print(text = '', cls = '') {
+    const node = document.createElement('div'); node.className = `line ${cls}`; node.innerHTML = escapeHTML(text); out.append(node);
+    node.scrollIntoView({block:'nearest'});
+  }
+  function hr(){ print('='.repeat(72), 'dim'); }
+  function sleep(ms, id){ return new Promise(resolve => setTimeout(() => resolve(id === generation), ms * Number(document.querySelector('#speed').value))); }
+  function tokens(text){
+    const found = String(text).toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    return new Set(found.filter(word => word.length >= 3));
+  }
+  // Exact port of rankFacts: overlap count, then newest-first ties, positive hits only;
+  // if there are no hits, return the most recent k in insertion order.
+  function rankFacts(facts, query, k){
+    const queryTokens = tokens(query);
+    const ranked = facts.map((fact, idx) => {
+      const factTokens = tokens(fact); let score = 0;
+      queryTokens.forEach(token => { if (factTokens.has(token)) score++; });
+      return {fact, score, idx};
+    }).sort((a,b) => b.score - a.score || b.idx - a.idx);
+    const hits = ranked.filter(item => item.score > 0).slice(0,k).map(item => item.fact);
+    return hits.length ? hits : facts.slice(Math.max(0, facts.length-k));
+  }
+  // Deterministic local compression standing in for the seeded Bedrock extraction step.
+  function extractFact(role, message){
+    if (role !== 'user') return 'NONE';
+    const m = message.toLocaleLowerCase();
+    if (/\b(i['’]?m|i am) alex\b/.test(m)) return 'The user is named Alex and plans weeknight dinners for their family.';
+    if (m.includes('vegetarian') || m.includes('allergic')) return 'Alex is vegetarian, allergic to peanuts, and does not want dishes with nuts.';
+    if (m.includes('30 minutes')) return 'Alex usually has about 30 minutes to cook after work.';
+    return 'NONE';
+  }
+  function ingest({user_id, role='user', message}, latency_ms=0){
+    user_id = user_id.trim(); message = message.trim();
+    if (!user_id || !message) throw new Error('user_id and message required');
+    const fact = extractFact(role, message), key = `mem:${user_id}`, stored = fact !== '' && fact.toLocaleLowerCase() !== 'none';
+    if (stored) { if (!store.has(key)) store.set(key, []); store.get(key).push(fact); }
+    return {user_id, fact, key, stored, latency_ms};
+  }
+  function context({user_id, query, k=3}, latency_ms=0){
+    user_id=user_id.trim(); query=query.trim(); if(!user_id||!query) throw new Error('user_id and query required');
+    k = Number.isInteger(+k) && +k > 0 ? +k : 3;
+    const all=(store.get(`mem:${user_id}`)||[]).slice(), facts=rankFacts(all,query,k);
+    return {user_id,query,facts,context:facts.join('\n'),total_stored:all.length,latency_ms};
+  }
+  function health(){ return {ok:'true'}; }
+  const wordTokens = text => Math.max(1, Math.round(text.length / 4));
+  function assistantReply(turn){
+    if (turn.includes('planning weeknight')) return "Hi Alex! I’ll help keep weeknight dinners practical for your family.";
+    if (turn.includes('vegetarian')) return "Understood — I’ll keep every suggestion vegetarian, peanut-free, and nut-free.";
+    if (turn.includes('30 minutes')) return "Got it. I’ll focus on meals that take 30 minutes or less.";
+    return "Try a quick chickpea and spinach tomato pasta. It’s vegetarian, nut-free, and ready in about 25 minutes.";
+  }
+  function fmtRow(label,input,output,ms,extra=''){
+    const base=`  ${label.padEnd(28)} in=${String(input).padEnd(5)} out=${String(output).padEnd(4)} total=${String(input+output).padEnd(5)}  ${String(ms).padStart(4)} ms`;
+    return base+(extra?`  ${extra}`:'');
+  }
+  async function run(){
+    const id=++generation, user=document.querySelector('#user').value.trim()||'demo-user', k=Math.max(1,Math.min(10,+document.querySelector('#k').value||3));
+    store.clear(); out.replaceChildren(); runButton.disabled=true;
+    hr(); print('Mini Memory Layer demo — full history vs retrieved context','bright'); print(`  memory service: in-browser simulation`); print(`  bedrock model:  ${MODEL}`); print(`  user_id:        ${user}`); hr();
+    if(!await sleep(450,id)) return;
+    print(); print('── Session 1: store preference (full history → Bedrock, then /ingest) ──','cyan'); print();
+    const history=[]; let s1In=0,s1Out=0,s1Ms=0,lastIn=0,lastOut=0,lastMs=0; const stored=[];
+    for(let i=0;i<SESSION1_TURNS.length;i++){
+      const turn=SESSION1_TURNS[i]; history.push({role:'user',content:turn});
+      const reply=assistantReply(turn), input=wordTokens(history.map(x=>x.content).join('\n'))+18, output=wordTokens(reply), ms=118+input*3+i*17;
+      history.push({role:'assistant',content:reply}); s1In+=input;s1Out+=output;s1Ms+=ms;lastIn=input;lastOut=output;lastMs=ms;
+      print(fmtRow('session1 turn',input,output,ms,`user="${turn.slice(0,48)}…"`)); print(`    assistant: ${reply}`,'dim');
+      if(!await sleep(520,id)) return;
+      const result=ingest({user_id:user,role:'user',message:turn},71+i*11);
+      if(result.stored){stored.push(result.fact);print(`    /ingest stored (${result.latency_ms} ms): ${result.fact}`,'green');}
+      else print(`    /ingest skipped (${result.latency_ms} ms): "${result.fact}"`,'amber');
+      if(!await sleep(460,id)) return;
+    }
+    const s1Chars=history.reduce((sum,x)=>sum+x.content.length,0);
+    print(); print('── Agent restart (local history cleared; Redis facts persist) ──','cyan'); print(); history.length=0;
+    print(`  local history messages: ${history.length}`);print(`  facts kept in Redis for ${user}: ${stored.length}`);stored.forEach(f=>print(`    • ${f}`,'green'));
+    if(!await sleep(800,id)) return;
+    print();print('── Session 2: recall via /context (no history replay) ──','cyan');print();
+    const ctx=context({user_id:user,query:SESSION2_QUESTION,k},4); print(`  /context (${ctx.latency_ms} ms) — ${ctx.total_stored} stored, top-${ctx.facts.length}:`);ctx.facts.forEach(f=>print(`    • ${f}`,'green'));
+    if(!await sleep(650,id)) return;
+    const prompt=`Known facts about this user:\n${ctx.context||'(no memories)'}\n\nUser question: ${SESSION2_QUESTION}`;
+    const reply2="Try a 20-minute lentil and vegetable stir-fry with rice and a soy-ginger sauce. It’s vegetarian and completely peanut- and nut-free.";
+    const in2=wordTokens(prompt)+18,out2=wordTokens(reply2),ms2=125+in2*2;
+    print(fmtRow('session2 (with memory)',in2,out2,ms2));print(`    assistant: ${reply2}`,'dim');
+    if(!await sleep(650,id)) return;
+    const saved=lastIn?Math.max(0,100*(1-in2/lastIn)):0;
+    print();hr();print('TOKEN / LATENCY DELTA','bright');hr();
+    print(fmtRow('session1 last turn (replay)',lastIn,lastOut,lastMs,`history_msgs=${SESSION1_TURNS.length*2} prompt_chars≈${s1Chars}`));
+    print(fmtRow('session2 with /context',in2,out2,ms2,`prompt_chars≈${prompt.length}`));print(fmtRow('session1 cumulative',s1In,s1Out,s1Ms,'(all replay turns)'));print();
+    print(`  input-token savings (session2 vs session1 last turn): ${saved.toFixed(0)}%`,'green');print(`  latency: session2 ${ms2} ms vs session1 last turn ${lastMs} ms`);print();
+    print('  Hook: same conversation, far fewer tokens on turn two —','bright');print('  because the memory layer remembered instead of replaying.','bright');hr();runButton.disabled=false;
+  }
+  function reset(){generation++;store.clear();runButton.disabled=false;out.innerHTML='<div class="dim">Ready. Press “Run demo” to begin.</div><div class="cursor"></div>';}
+  runButton.addEventListener('click',run);resetButton.addEventListener('click',reset);
+  window.MemoryDemo=Object.freeze({health,tokens,rankFacts,extractFact,ingest,context,reset});
+})();
+</script>
+</body>
+</html>

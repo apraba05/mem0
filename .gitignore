@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+memory-service
+.bin/
+*.exe
+/tmp/
